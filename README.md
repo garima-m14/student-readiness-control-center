@@ -123,6 +123,10 @@ npm audit
 # With the complete Docker stack running:
 npx playwright install chromium
 npm run test:e2e
+# Optional local failure drill (stops/restarts this project's MongoDB):
+npm run test:outage -w backend
+# Capture the built application and check browser runtime/mobile layout:
+node scripts/capture.mjs
 ```
 
 `npm test` runs the pure domain suite, Supertest against real PostgreSQL/MongoDB, and React Testing Library tests. The integration runner creates and migrates separate `readiness_test` databases. It refuses unexpected source database names. The local PostgreSQL account requires CREATEDB for this runner. Tests append unique fixtures and never truncate your application data. A rollback test installs a temporary failure trigger only in the isolated test database and removes it in a finally block. Do not run test databases under production credentials.
