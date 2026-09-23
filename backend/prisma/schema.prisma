@@ -1,0 +1,109 @@
+generator client {
+  provider = "prisma-client-js"
+}
+datasource db {
+  provider = "postgresql"
+  url = env("DATABASE_URL")
+}
+enum TenantStatus {
+  ACTIVE
+  SUSPENDED
+}
+enum Role {
+  ADMIN
+  EVALUATOR
+  VIEWER
+}
+model Tenant {
+  id String @id @default(uuid()) @db.Uuid
+  name String @unique
+  status TenantStatus @default(ACTIVE)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  users User[]
+  students Student[]
+}
+model User {
+  id String @id @default(uuid()) @db.Uuid
+  tenantId String @db.Uuid
+  tenant Tenant @relation(fields: [tenantId], references: [id])
+  name String
+  email String
+  passwordHash String
+  role Role
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  sessions Session[]
+  attempts Attempt[]
+  @@unique([tenantId, email])
+  @@unique([tenantId, id])
+}
+model Session {
+  id String @id @default(uuid()) @db.Uuid
+  userId String @db.Uuid
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
+  revokedAt DateTime?
+}
+model Student {
+  id String @id @default(uuid()) @db.Uuid
+  tenantId String @db.Uuid
+  tenant Tenant @relation(fields: [tenantId], references: [id])
+  name String
+  email String
+  phone String?
+  version Int @default(1)
+  score Decimal @default(0) @db.Decimal(7, 4)
+  status String @default("INCOMPLETE")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  attempts Attempt[]
+  @@unique([tenantId, email])
+  @@unique([tenantId, id])
+  @@index([tenantId, name, id])
+  @@index([tenantId, status, score, id])
+}
+model Competency {
+  id String @id
+  weight Int
+  attempts Attempt[]
+}
+model Attempt {
+  id String @id @default(uuid()) @db.Uuid
+  tenantId String @db.Uuid
+  studentId String @db.Uuid
+  student Student @relation(fields: [tenantId, studentId], references: [tenantId, id])
+  competencyId String
+  competency Competency @relation(fields: [competencyId], references: [id])
+  score Decimal @db.Decimal(5, 2)
+  evaluatorId String @db.Uuid
+  evaluator User @relation(fields: [tenantId, evaluatorId], references: [tenantId, id])
+  attemptedAt DateTime
+  voidedAt DateTime?
+  createdAt DateTime @default(now())
+  @@index([tenantId, studentId, competencyId, attemptedAt, id])
+}
+model IdempotencyRecord {
+  id String @id @default(uuid()) @db.Uuid
+  tenantId String @db.Uuid
+  key String
+  requestFingerprint String
+  status String
+  responseStatus Int
+  responseBody Json
+  createdAt DateTime @default(now())
+  expiresAt DateTime
+  @@unique([tenantId, key])
+}
+model Outbox {
+  id String @id @default(uuid()) @db.Uuid
+  tenantId String @db.Uuid
+  studentId String @db.Uuid
+  payload Json
+  createdAt DateTime @default(now())
+  deliveredAt DateTime?
+  retries Int @default(0)
+  nextAttemptAt DateTime @default(now())
+  @@index([deliveredAt, nextAttemptAt])
+  @@index([tenantId, studentId])
+}
