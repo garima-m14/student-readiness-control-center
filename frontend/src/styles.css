@@ -478,6 +478,7 @@ main {
   max-width: 170px;
 }
 .table-wrap {
+  position: relative;
   overflow-x: auto;
 }
 table {
@@ -1414,4 +1415,13 @@ form select {
   .spin {
     animation: none;
   }
+}
+.login-story > .eyebrow,
+.login-story > p,
+.login-story > small,
+.login-story .story-check {
+  color: #c7d4bb;
+}
+.login-story h1 em {
+  color: #bdd798;
 }

@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { Prisma } from "@prisma/client";
-import { db, events } from "../database/client.js";
+import { db, events, mongo } from "../database/client.js";
 import type { Transaction } from "../students/repository.js";
 export async function enqueue(
   tx: Transaction,
@@ -29,6 +29,8 @@ export async function enqueue(
 }
 let initialized = false;
 export async function deliverEvents() {
+  // Explicit connect also recovers after the driver's initial auto-connect failed.
+  await mongo.connect();
   if (!initialized) {
     await events.createIndex({ eventId: 1 }, { unique: true });
     await events.createIndex({

@@ -29,7 +29,7 @@ test("sign in, search, assess, edit and switch tenant without leaking prior stud
   ).toBeVisible();
   await page.getByLabel("Score", { exact: false }).fill("88");
   await page.getByRole("button", { name: "Save assessment" }).click();
-  await expect(page.getByRole("status")).toContainText("Assessment saved");
+  await expect(page.getByRole("status").filter({hasText:'Assessment saved'})).toBeVisible();
   await expect(
     page.getByText("Assessment recorded", { exact: true }).first(),
   ).toBeVisible({ timeout: 15000 });

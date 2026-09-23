@@ -76,6 +76,7 @@ try {
   for (let i = 0; i < 45; i++) {
     await setTimeout(2000);
     try {
+      await mongo.connect();
       if (
         (await events.countDocuments({
           tenantId: user.tenantId,
@@ -85,8 +86,8 @@ try {
         delivered = true;
         break;
       }
-    } catch {
-      /* Wait for restarted MongoDB to accept connections. */
+    } catch (error) {
+      console.log('Waiting for MongoDB:', error instanceof Error ? error.name : 'unknown');
     }
   }
   assert.ok(delivered, "Outbox must eventually deliver after MongoDB recovery");

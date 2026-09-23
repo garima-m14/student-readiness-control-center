@@ -1,4 +1,4 @@
-import { events, db } from "../database/client.js";
+import { events, db, mongo } from "../database/client.js";
 import { ApiError, notFound } from "../utils/errors.js";
 import { z } from "zod";
 const cursorSchema = z.object({
@@ -32,6 +32,7 @@ export async function activity(
       throw new ApiError(400, "VALIDATION_ERROR", "Invalid activity cursor");
     }
   }
+  await mongo.connect();
   const items = await events
     .find(
       {
@@ -84,6 +85,7 @@ export async function activity(
   };
 }
 export async function metrics(tenantId: string) {
+  await mongo.connect();
   const duplicates = await events
     .aggregate([
       { $match: { tenantId, type: "attempt.succeeded" } },
