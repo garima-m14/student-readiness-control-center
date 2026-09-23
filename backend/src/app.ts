@@ -1,30 +1,91 @@
-import { randomUUID } from 'node:crypto';
-import express, { type ErrorRequestHandler } from 'express';
-import helmet from 'helmet';
-import cors from 'cors';
-import cookieParser from 'cookie-parser';
-import { ZodError } from 'zod';
-import { ApiError } from './utils/errors.js';
-import { asyncHandler, authenticated, sameOrigin } from './middleware/security.js';
-import { authRouter } from './auth/controller.js';
-import { students } from './students/controller.js';
-import { metrics } from './activity/service.js';
-import { db } from './database/client.js';
-export const app=express();
-app.disable('x-powered-by');
-app.use((req,res,next)=>{req.requestId=randomUUID();res.set('X-Request-Id',req.requestId);res.set('Cache-Control','no-store');next();});
-app.use(helmet(),cors({origin:process.env.FRONTEND_ORIGIN || 'http://localhost:5173',credentials:true}),express.json({limit:'16kb'}),cookieParser(),sameOrigin);
-app.get('/api/health',asyncHandler(async(_req,res)=>{await db.$queryRaw`SELECT 1`;res.json({ok:true});}));
-app.use('/api/auth',authRouter);
-app.use('/api/students',authenticated,students);
-app.get('/api/operations',authenticated,asyncHandler(async(req,res)=>{if(req.identity.role!=='ADMIN') throw new ApiError(403,'FORBIDDEN','Administrator access required');res.json(await metrics(req.identity.tenantId));}));
-app.use((_req,_res,next)=>next(new ApiError(404,'NOT_FOUND','Resource not found')));
-const errors:ErrorRequestHandler=(error:unknown,req,res,_next)=>{
-  let safe:ApiError;
-  if(error instanceof ZodError) safe=new ApiError(400,'VALIDATION_ERROR','Request validation failed',Object.fromEntries(error.issues.map(i=>[i.path.join('.')||'request',i.message])));
-  else if(error instanceof ApiError) safe=error;
-  else if(error instanceof SyntaxError) safe=new ApiError(400,'VALIDATION_ERROR','Invalid JSON body');
-  else {safe=new ApiError(500,'INTERNAL_ERROR','Unable to complete the request');console.error(JSON.stringify({code:safe.code,requestId:req.requestId}));}
-  res.status(safe.status).json({code:safe.code,message:safe.message,requestId:req.requestId,fields:safe.fields});
+import { randomUUID } from "node:crypto";
+import express, { type ErrorRequestHandler } from "express";
+import helmet from "helmet";
+import cors from "cors";
+import cookieParser from "cookie-parser";
+import { ZodError } from "zod";
+import { ApiError } from "./utils/errors.js";
+import {
+  asyncHandler,
+  authenticated,
+  sameOrigin,
+} from "./middleware/security.js";
+import { authRouter } from "./auth/controller.js";
+import { students } from "./students/controller.js";
+import { metrics } from "./activity/service.js";
+import { db } from "./database/client.js";
+export const app = express();
+app.disable("x-powered-by");
+app.use((req, res, next) => {
+  req.requestId = randomUUID();
+  res.set("X-Request-Id", req.requestId);
+  res.set("Cache-Control", "no-store");
+  next();
+});
+app.use(
+  helmet(),
+  cors({
+    origin: process.env.FRONTEND_ORIGIN || "http://localhost:5174",
+    credentials: true,
+  }),
+  express.json({ limit: "16kb" }),
+  cookieParser(),
+  sameOrigin,
+);
+app.get(
+  "/api/health",
+  asyncHandler(async (_req, res) => {
+    await db.$queryRaw`SELECT 1`;
+    res.json({ ok: true });
+  }),
+);
+app.use("/api/auth", authRouter);
+app.use("/api/students", authenticated, students);
+app.get(
+  "/api/operations",
+  authenticated,
+  asyncHandler(async (req, res) => {
+    if (req.identity.role !== "ADMIN")
+      throw new ApiError(403, "FORBIDDEN", "Administrator access required");
+    res.json(await metrics(req.identity.tenantId));
+  }),
+);
+app.use((_req, _res, next) =>
+  next(new ApiError(404, "NOT_FOUND", "Resource not found")),
+);
+const errors: ErrorRequestHandler = (error: unknown, req, res, _next) => {
+  let safe: ApiError;
+  if (error instanceof ZodError)
+    safe = new ApiError(
+      400,
+      "VALIDATION_ERROR",
+      "Request validation failed",
+      Object.fromEntries(
+        error.issues.map((i) => [i.path.join(".") || "request", i.message]),
+      ),
+    );
+  else if (error instanceof ApiError) safe = error;
+  else if (error instanceof SyntaxError)
+    safe = new ApiError(400, "VALIDATION_ERROR", "Invalid JSON body");
+  else if (error instanceof Error && 'type' in error && error.type === 'entity.too.large')
+    safe = new ApiError(413, 'VALIDATION_ERROR', 'Request body is too large');
+  else {
+    safe = new ApiError(
+      500,
+      "INTERNAL_ERROR",
+      "Unable to complete the request",
+    );
+    console.error(
+      JSON.stringify({ code: safe.code, requestId: req.requestId }),
+    );
+  }
+  res
+    .status(safe.status)
+    .json({
+      code: safe.code,
+      message: safe.message,
+      requestId: req.requestId,
+      fields: safe.fields,
+    });
 };
 app.use(errors);

@@ -11,7 +11,8 @@
     "test:integration": "tsx tests/run-integration.ts",
     "db:migrate": "prisma migrate deploy",
     "db:seed": "tsx prisma/seed.ts",
-    "generate": "prisma generate"
+    "generate": "prisma generate",
+    "test:outage": "tsx tests/outage-drill.ts"
   },
   "dependencies": {
     "@prisma/client": "6.12.0",

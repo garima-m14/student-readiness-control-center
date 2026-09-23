@@ -1,48 +1,409 @@
-import 'dotenv/config';
-import { randomUUID } from 'node:crypto';
-import { beforeAll,afterAll,describe,it,expect } from 'vitest';
-import request from 'supertest';
-import { app } from '../src/app.js';
-import { db,mongo,events } from '../src/database/client.js';
-import { seed } from '../prisma/seed.js';
-import { deliverEvents } from '../src/events/outbox.js';
-import { detail } from '../src/students/repository.js';
-let a:ReturnType<typeof request.agent>,b:ReturnType<typeof request.agent>,viewer:ReturnType<typeof request.agent>;
-let tenantA:string,tenantB:string,studentA:string,studentB:string,evaluator:string;
-const input={competency:'frontend',score:85,attemptedAt:'2026-09-20T10:00:00Z'};
-const ids:string[]=[];
-async function signIn(organization:string,email:string){const agent=request.agent(app);const r=await agent.post('/api/auth/login').set('X-Requested-With','readiness').send({organization,email,password:process.env.SEED_PASSWORD});expect(r.status).toBe(200);return agent;}
-const post=(key:string,body:object=input,id=studentA)=>a.post(`/api/students/${id}/attempts`).set('X-Requested-With','readiness').set('Idempotency-Key',key).send(body);
-beforeAll(async()=>{
-  if(!process.env.DATABASE_URL?.includes('readiness_test') || !process.env.MONGODB_URL?.includes('readiness_test'))throw new Error('Integration tests require isolated readiness_test databases');
+import "dotenv/config";
+import { randomUUID } from "node:crypto";
+import { beforeAll, afterAll, describe, it, expect } from "vitest";
+import request from "supertest";
+import { app } from "../src/app.js";
+import { db, mongo, events } from "../src/database/client.js";
+import { seed } from "../prisma/seed.js";
+import { deliverEvents } from "../src/events/outbox.js";
+import { detail } from "../src/students/repository.js";
+import { metrics } from '../src/activity/service.js';
+let a: ReturnType<typeof request.agent>,
+  b: ReturnType<typeof request.agent>,
+  viewer: ReturnType<typeof request.agent>;
+let tenantA: string,
+  tenantB: string,
+  studentA: string,
+  studentB: string,
+  evaluator: string;
+const input = {
+  competency: "frontend",
+  score: 85,
+  attemptedAt: "2026-09-20T10:00:00Z",
+};
+const ids: string[] = [];
+async function signIn(organization: string, email: string) {
+  const agent = request.agent(app);
+  const r = await agent
+    .post("/api/auth/login")
+    .set("X-Requested-With", "readiness")
+    .send({ organization, email, password: process.env.SEED_PASSWORD });
+  expect(r.status).toBe(200);
+  return agent;
+}
+const post = (key: string, body: object = input, id = studentA) =>
+  a
+    .post(`/api/students/${id}/attempts`)
+    .set("X-Requested-With", "readiness")
+    .set("Idempotency-Key", key)
+    .send(body);
+beforeAll(async () => {
+  if (
+    !process.env.DATABASE_URL?.includes("readiness_test") ||
+    !process.env.MONGODB_URL?.includes("readiness_test")
+  )
+    throw new Error(
+      "Integration tests require isolated readiness_test databases",
+    );
   await seed();
-  a=await signIn('Acme Training','admin@acme.test');b=await signIn('Northstar Academy','admin@northstar.test');viewer=await signIn('Acme Training','viewer@acme.test');
-  tenantA=(await db.tenant.findUniqueOrThrow({where:{name:'Acme Training'}})).id;tenantB=(await db.tenant.findUniqueOrThrow({where:{name:'Northstar Academy'}})).id;
-  evaluator=(await db.user.findFirstOrThrow({where:{tenantId:tenantA,role:'ADMIN'}})).id;
-  for(const tenantId of [tenantA,tenantB]){const s=await db.student.create({data:{tenantId,name:'Integration Student',email:`${randomUUID()}@test.example`}});ids.push(s.id);}
-  [studentA,studentB]=ids;
-},60000);
-afterAll(async()=>{await db.$disconnect();await mongo.close();});
-describe('real database API security and concurrency',()=>{
-  it('requires authentication and rejects invalid login',async()=>{expect((await request(app).get('/api/students')).status).toBe(401);expect((await request(app).post('/api/auth/login').set('X-Requested-With','readiness').send({organization:'Acme Training',email:'admin@acme.test',password:'wrong'})).status).toBe(401);});
-  it('returns authenticated identity without secrets',async()=>{const r=await a.get('/api/auth/me');expect(r.body.tenantId).toBe(tenantA);expect(JSON.stringify(r.body)).not.toContain('password');});
-  it('lists only the authenticated tenant and rejects tenant spoofing',async()=>{const r=await a.get('/api/students?limit=100');expect(r.status).toBe(200);expect(r.body.items.every((s:{tenantId:string})=>s.tenantId===tenantA)).toBe(true);expect((await a.get(`/api/students?tenantId=${tenantB}`)).status).toBe(400);});
-  it('supports search, status, stable sorting and scoped cursors',async()=>{const r=await a.get('/api/students?sort=score:desc&limit=2');expect(r.status).toBe(200);const next=await a.get('/api/students').query({sort:'score:desc',limit:2,cursor:r.body.nextCursor});expect(next.status).toBe(200);expect(next.body.items.map((s:{id:string})=>s.id)).not.toContain(r.body.items[0].id);expect((await b.get('/api/students').query({sort:'score:desc',limit:2,cursor:r.body.nextCursor})).status).toBe(400);const filtered=await a.get('/api/students?search=Olivia&status=READY');expect(filtered.body.items).toHaveLength(1);});
-  it('does not disclose foreign students through detail, update, attempts or activity',async()=>{for(const id of [studentB,randomUUID()]) {expect((await a.get(`/api/students/${id}`)).status).toBe(404);expect((await a.get(`/api/students/${id}/activity`)).status).toBe(404);expect((await a.patch(`/api/students/${id}`).set('X-Requested-With','readiness').send({name:'x',expectedVersion:1})).status).toBe(404);expect((await post(randomUUID(),input,id)).status).toBe(404);}});
-  it('enforces RBAC and CSRF origin policy',async()=>{expect((await viewer.post(`/api/students/${studentA}/attempts`).set('X-Requested-With','readiness').set('Idempotency-Key',randomUUID()).send(input)).status).toBe(403);expect((await a.patch(`/api/students/${studentA}`).send({name:'x',expectedVersion:1})).status).toBe(403);expect((await a.patch(`/api/students/${studentA}`).set('X-Requested-With','readiness').set('Origin','https://evil.example').send({name:'x',expectedVersion:1})).status).toBe(403);});
-  it.each([{score:101},{score:-1},{score:85.001},{attemptedAt:'invalid'},{attemptedAt:'2099-01-01T00:00:00Z'},{evaluatorId:'spoof'},{tenantId:'spoof'}])('rejects invalid attempt %j',async override=>{const r=await post(randomUUID(),{...input,...override});expect(r.status).toBe(400);expect(r.body).toMatchObject({code:'VALIDATION_ERROR',requestId:expect.any(String),fields:expect.any(Object)});});
-  it.each(['limit=0','limit=101','sort=name;DROP TABLE','status=FAKE','cursor=bad','search='+ 'a'.repeat(101)])('validates query %s',async query=>expect((await a.get('/api/students?'+query)).status).toBe(400));
-  it('replays the original response and emits only one success event',async()=>{const key=randomUUID();const first=await post(key);expect(first.status).toBe(201);const again=await post(key);expect(again.body).toEqual(first.body);expect(again.headers['idempotency-replayed']).toBe('true');expect((await post(key,{...input,score:86})).status).toBe(409);await deliverEvents();await deliverEvents();expect(await events.countDocuments({tenantId:tenantA,attemptId:first.body.attemptId})).toBe(1);});
-  it('parallel identical requests create exactly one attempt, outbox and idempotency record',async()=>{const key=randomUUID();const results=await Promise.all(Array.from({length:6},()=>post(key)));expect(results.map(r=>r.status)).toEqual([201,201,201,201,201,201]);const id=results[0].body.attemptId;expect(new Set(results.map(r=>r.body.attemptId)).size).toBe(1);expect(await db.attempt.count({where:{tenantId:tenantA,id}})).toBe(1);expect(await db.idempotencyRecord.count({where:{tenantId:tenantA,key}})).toBe(1);await deliverEvents();expect(await events.countDocuments({tenantId:tenantA,attemptId:id})).toBe(1);});
-  it('same key in different tenants is independent',async()=>{const key=randomUUID();expect((await post(key)).status).toBe(201);expect((await b.post(`/api/students/${studentB}/attempts`).set('X-Requested-With','readiness').set('Idempotency-Key',key).send(input)).status).toBe(201);});
-  it('permits one concurrent update and rejects stale versions without partial changes',async()=>{const current=await a.get(`/api/students/${studentA}`);const patch=(name:string)=>a.patch(`/api/students/${studentA}`).set('X-Requested-With','readiness').send({name,expectedVersion:current.body.version});const results=await Promise.all([patch('Writer One'),patch('Writer Two')]);expect(results.map(r=>r.status).sort()).toEqual([200,409]);const after=await a.get(`/api/students/${studentA}`);expect(after.body.version).toBe(current.body.version+1);expect((await a.patch(`/api/students/${studentA}`).set('X-Requested-With','readiness').send({name:'bad',expectedVersion:after.body.version,role:'ADMIN'})).status).toBe(400);});
-  it('rolls back attempt, student, idempotency and outbox if SQL fails late in transaction',async()=>{const before=await db.student.findFirstOrThrow({where:{tenantId:tenantA,id:studentA}});const count=await db.attempt.count({where:{tenantId:tenantA,studentId:studentA}});const key=randomUUID();
-    await db.$executeRawUnsafe(`CREATE OR REPLACE FUNCTION reject_test_outbox() RETURNS trigger AS $$ BEGIN IF NEW."studentId" = '${studentA}'::uuid THEN RAISE EXCEPTION 'test injected SQL failure'; END IF; RETURN NEW; END $$ LANGUAGE plpgsql`);
-    await db.$executeRawUnsafe('CREATE TRIGGER integration_failure BEFORE INSERT ON "Outbox" FOR EACH ROW EXECUTE FUNCTION reject_test_outbox()');
-    try {const r=await post(key);expect(r.status).toBe(500);expect(JSON.stringify(r.body)).not.toContain('SQL');expect(await db.attempt.count({where:{tenantId:tenantA,studentId:studentA}})).toBe(count);expect((await db.student.findUniqueOrThrow({where:{id:studentA}})).version).toBe(before.version);expect(await db.idempotencyRecord.count({where:{tenantId:tenantA,key}})).toBe(0);}finally{await db.$executeRawUnsafe('DROP TRIGGER integration_failure ON "Outbox"');await db.$executeRawUnsafe('DROP FUNCTION reject_test_outbox()');}
+  a = await signIn("Acme Training", "admin@acme.test");
+  b = await signIn("Northstar Academy", "admin@northstar.test");
+  viewer = await signIn("Acme Training", "viewer@acme.test");
+  tenantA = (
+    await db.tenant.findUniqueOrThrow({ where: { name: "Acme Training" } })
+  ).id;
+  tenantB = (
+    await db.tenant.findUniqueOrThrow({ where: { name: "Northstar Academy" } })
+  ).id;
+  evaluator = (
+    await db.user.findFirstOrThrow({
+      where: { tenantId: tenantA, role: "ADMIN" },
+    })
+  ).id;
+  for (const tenantId of [tenantA, tenantB]) {
+    const s = await db.student.create({
+      data: {
+        tenantId,
+        name: "Integration Student",
+        email: `${randomUUID()}@test.example`,
+      },
+    });
+    ids.push(s.id);
+  }
+  [studentA, studentB] = ids;
+}, 60000);
+afterAll(async () => {
+  await db.$disconnect();
+  await mongo.close();
+});
+describe("real database API security and concurrency", () => {
+  it("requires authentication and rejects invalid login", async () => {
+    expect((await request(app).get("/api/students")).status).toBe(401);
+    expect(
+      (
+        await request(app)
+          .post("/api/auth/login")
+          .set("X-Requested-With", "readiness")
+          .send({
+            organization: "Acme Training",
+            email: "admin@acme.test",
+            password: "wrong",
+          })
+      ).status,
+    ).toBe(401);
   });
-  it('database evidence selection honors tie breaks, voiding and missing competencies',async()=>{const s=await db.student.create({data:{tenantId:tenantA,name:'Evidence test',email:`${randomUUID()}@test.example`}});const low='00000000-0000-4000-8000-'+randomUUID().slice(-12);const high='ffffffff-ffff-4fff-bfff-'+randomUUID().slice(-12);for(const [id,score,voidedAt,attemptedAt] of [[low,20,null,new Date('2026-01-01')],[high,90,null,new Date('2026-01-01')],[randomUUID(),0,new Date(),new Date('2026-02-01')]] as const)await db.attempt.create({data:{id,tenantId:tenantA,studentId:s.id,competencyId:'frontend',score,evaluatorId:evaluator,voidedAt,attemptedAt}});const result=await detail(tenantA,s.id);expect(result.competencies[0].latest?.id).toBe(high);expect(result.status).toBe('INCOMPLETE');expect(result.missing).toHaveLength(3);});
-  it('composite FKs prevent cross-tenant evidence even at database level',async()=>{await expect(db.attempt.create({data:{tenantId:tenantA,studentId:studentB,competencyId:'frontend',score:50,evaluatorId:evaluator,attemptedAt:new Date()}})).rejects.toThrow();});
-  it('activity and operations remain tenant scoped and contain safe metadata',async()=>{await deliverEvents();const activity=await a.get(`/api/students/${studentA}/activity?limit=2`);expect(activity.status).toBe(200);expect(activity.body.items.length).toBeLessThanOrEqual(2);expect(activity.body.items.every((e:{studentId:string})=>e.studentId===studentA)).toBe(true);const metrics=await a.get('/api/operations');expect(metrics.status).toBe(200);expect(metrics.body.tenantId).toBe(tenantA);expect(metrics.body.duplicates).toEqual([]);expect(metrics.body.rejectionRate).toBeGreaterThan(0);expect((await viewer.get('/api/operations')).status).toBe(403);});
-  it('logout revokes server-side session',async()=>{const agent=await signIn('Acme Training','evaluator@acme.test');expect((await agent.post('/api/auth/logout').set('X-Requested-With','readiness')).status).toBe(200);expect((await agent.get('/api/students')).status).toBe(401);});
+  it("returns authenticated identity without secrets", async () => {
+    const r = await a.get("/api/auth/me");
+    expect(r.body.tenantId).toBe(tenantA);
+    expect(JSON.stringify(r.body)).not.toContain("password");
+  });
+  it("lists only the authenticated tenant and rejects tenant spoofing", async () => {
+    const r = await a.get("/api/students?limit=100");
+    expect(r.status).toBe(200);
+    expect(
+      r.body.items.every((s: { tenantId: string }) => s.tenantId === tenantA),
+    ).toBe(true);
+    expect((await a.get(`/api/students?tenantId=${tenantB}`)).status).toBe(400);
+  });
+  it("supports search, status, stable sorting and scoped cursors", async () => {
+    const r = await a.get("/api/students?sort=score:desc&limit=2");
+    expect(r.status).toBe(200);
+    const next = await a
+      .get("/api/students")
+      .query({ sort: "score:desc", limit: 2, cursor: r.body.nextCursor });
+    expect(next.status).toBe(200);
+    expect(next.body.items.map((s: { id: string }) => s.id)).not.toContain(
+      r.body.items[0].id,
+    );
+    expect(
+      (
+        await b
+          .get("/api/students")
+          .query({ sort: "score:desc", limit: 2, cursor: r.body.nextCursor })
+      ).status,
+    ).toBe(400);
+    const filtered = await a.get("/api/students?search=Olivia&status=READY");
+    expect(filtered.body.items).toHaveLength(1);
+  });
+  it("does not disclose foreign students through detail, update, attempts or activity", async () => {
+    for (const id of [studentB, randomUUID()]) {
+      expect((await a.get(`/api/students/${id}`)).status).toBe(404);
+      expect((await a.get(`/api/students/${id}/activity`)).status).toBe(404);
+      expect(
+        (
+          await a
+            .patch(`/api/students/${id}`)
+            .set("X-Requested-With", "readiness")
+            .send({ name: "x", expectedVersion: 1 })
+        ).status,
+      ).toBe(404);
+      expect((await post(randomUUID(), input, id)).status).toBe(404);
+    }
+  });
+  it("enforces RBAC and CSRF origin policy", async () => {
+    expect(
+      (
+        await viewer
+          .post(`/api/students/${studentA}/attempts`)
+          .set("X-Requested-With", "readiness")
+          .set("Idempotency-Key", randomUUID())
+          .send(input)
+      ).status,
+    ).toBe(403);
+    expect(
+      (
+        await a
+          .patch(`/api/students/${studentA}`)
+          .send({ name: "x", expectedVersion: 1 })
+      ).status,
+    ).toBe(403);
+    expect(
+      (
+        await a
+          .patch(`/api/students/${studentA}`)
+          .set("X-Requested-With", "readiness")
+          .set("Origin", "https://evil.example")
+          .send({ name: "x", expectedVersion: 1 })
+      ).status,
+    ).toBe(403);
+  });
+  it.each([
+    { score: 101 },
+    { score: -1 },
+    { score: 85.001 },
+    { attemptedAt: "invalid" },
+    { attemptedAt: "2099-01-01T00:00:00Z" },
+    { evaluatorId: "spoof" },
+    { tenantId: "spoof" },
+  ])("rejects invalid attempt %j", async (override) => {
+    const r = await post(randomUUID(), { ...input, ...override });
+    expect(r.status).toBe(400);
+    expect(r.body).toMatchObject({
+      code: "VALIDATION_ERROR",
+      requestId: expect.any(String),
+      fields: expect.any(Object),
+    });
+  });
+  it.each([
+    "limit=0",
+    "limit=101",
+    "sort=name;DROP TABLE",
+    "status=FAKE",
+    "cursor=bad",
+    "search=" + "a".repeat(101),
+  ])("validates query %s", async (query) =>
+    expect((await a.get("/api/students?" + query)).status).toBe(400),
+  );
+  it("replays the original response and emits only one success event", async () => {
+    const key = randomUUID();
+    const first = await post(key);
+    expect(first.status).toBe(201);
+    const again = await post(key);
+    expect(again.body).toEqual(first.body);
+    expect(again.headers["idempotency-replayed"]).toBe("true");
+    expect((await post(key, { ...input, score: 86 })).status).toBe(409);
+    await deliverEvents();
+    await deliverEvents();
+    expect(
+      await events.countDocuments({
+        tenantId: tenantA,
+        attemptId: first.body.attemptId,
+      }),
+    ).toBe(1);
+  });
+  it("parallel identical requests create exactly one attempt, outbox and idempotency record", async () => {
+    const key = randomUUID();
+    const results = await Promise.all(
+      Array.from({ length: 6 }, () => post(key)),
+    );
+    expect(results.map((r) => r.status)).toEqual([
+      201, 201, 201, 201, 201, 201,
+    ]);
+    const id = results[0].body.attemptId;
+    expect(new Set(results.map((r) => r.body.attemptId)).size).toBe(1);
+    expect(await db.attempt.count({ where: { tenantId: tenantA, id } })).toBe(
+      1,
+    );
+    expect(
+      await db.idempotencyRecord.count({ where: { tenantId: tenantA, key } }),
+    ).toBe(1);
+    await deliverEvents();
+    expect(
+      await events.countDocuments({ tenantId: tenantA, attemptId: id }),
+    ).toBe(1);
+  });
+  it("same key in different tenants is independent", async () => {
+    const key = randomUUID();
+    expect((await post(key)).status).toBe(201);
+    expect(
+      (
+        await b
+          .post(`/api/students/${studentB}/attempts`)
+          .set("X-Requested-With", "readiness")
+          .set("Idempotency-Key", key)
+          .send(input)
+      ).status,
+    ).toBe(201);
+  });
+  it("permits one concurrent update and rejects stale versions without partial changes", async () => {
+    const current = await a.get(`/api/students/${studentA}`);
+    const patch = (name: string) =>
+      a
+        .patch(`/api/students/${studentA}`)
+        .set("X-Requested-With", "readiness")
+        .send({ name, expectedVersion: current.body.version });
+    const results = await Promise.all([
+      patch("Writer One"),
+      patch("Writer Two"),
+    ]);
+    expect(results.map((r) => r.status).sort()).toEqual([200, 409]);
+    const after = await a.get(`/api/students/${studentA}`);
+    expect(after.body.version).toBe(current.body.version + 1);
+    expect(
+      (
+        await a
+          .patch(`/api/students/${studentA}`)
+          .set("X-Requested-With", "readiness")
+          .send({
+            name: "bad",
+            expectedVersion: after.body.version,
+            role: "ADMIN",
+          })
+      ).status,
+    ).toBe(400);
+  });
+  it("rolls back attempt, student, idempotency and outbox if SQL fails late in transaction", async () => {
+    const before = await db.student.findFirstOrThrow({
+      where: { tenantId: tenantA, id: studentA },
+    });
+    const count = await db.attempt.count({
+      where: { tenantId: tenantA, studentId: studentA },
+    });
+    const key = randomUUID();
+    await db.$executeRawUnsafe(
+      `CREATE OR REPLACE FUNCTION reject_test_outbox() RETURNS trigger AS $$ BEGIN IF NEW."studentId" = '${studentA}'::uuid THEN RAISE EXCEPTION 'test injected SQL failure'; END IF; RETURN NEW; END $$ LANGUAGE plpgsql`,
+    );
+    await db.$executeRawUnsafe(
+      'CREATE TRIGGER integration_failure BEFORE INSERT ON "Outbox" FOR EACH ROW EXECUTE FUNCTION reject_test_outbox()',
+    );
+    try {
+      const r = await post(key);
+      expect(r.status).toBe(500);
+      expect(JSON.stringify(r.body)).not.toContain("SQL");
+      expect(
+        await db.attempt.count({
+          where: { tenantId: tenantA, studentId: studentA },
+        }),
+      ).toBe(count);
+      expect(
+        (await db.student.findUniqueOrThrow({ where: { id: studentA } }))
+          .version,
+      ).toBe(before.version);
+      expect(
+        await db.idempotencyRecord.count({ where: { tenantId: tenantA, key } }),
+      ).toBe(0);
+    } finally {
+      await db.$executeRawUnsafe(
+        'DROP TRIGGER integration_failure ON "Outbox"',
+      );
+      await db.$executeRawUnsafe("DROP FUNCTION reject_test_outbox()");
+    }
+  });
+  it("database evidence selection honors tie breaks, voiding and missing competencies", async () => {
+    const s = await db.student.create({
+      data: {
+        tenantId: tenantA,
+        name: "Evidence test",
+        email: `${randomUUID()}@test.example`,
+      },
+    });
+    const low = "00000000-0000-4000-8000-" + randomUUID().slice(-12);
+    const high = "ffffffff-ffff-4fff-bfff-" + randomUUID().slice(-12);
+    for (const [id, score, voidedAt, attemptedAt] of [
+      [low, 20, null, new Date("2026-01-01")],
+      [high, 90, null, new Date("2026-01-01")],
+      [randomUUID(), 0, new Date(), new Date("2026-02-01")],
+    ] as const)
+      await db.attempt.create({
+        data: {
+          id,
+          tenantId: tenantA,
+          studentId: s.id,
+          competencyId: "frontend",
+          score,
+          evaluatorId: evaluator,
+          voidedAt,
+          attemptedAt,
+        },
+      });
+    const result = await detail(tenantA, s.id);
+    expect(result.competencies[0].latest?.id).toBe(high);
+    expect(result.status).toBe("INCOMPLETE");
+    expect(result.missing).toHaveLength(3);
+  });
+  it("composite FKs prevent cross-tenant evidence even at database level", async () => {
+    await expect(
+      db.attempt.create({
+        data: {
+          tenantId: tenantA,
+          studentId: studentB,
+          competencyId: "frontend",
+          score: 50,
+          evaluatorId: evaluator,
+          attemptedAt: new Date(),
+        },
+      }),
+    ).rejects.toThrow();
+  });
+  it("activity and operations remain tenant scoped and contain safe metadata", async () => {
+    await deliverEvents();
+    const activity = await a.get(`/api/students/${studentA}/activity?limit=2`);
+    expect(activity.status).toBe(200);
+    expect(activity.body.items.length).toBeLessThanOrEqual(2);
+    expect(
+      activity.body.items.every(
+        (e: { studentId: string }) => e.studentId === studentA,
+      ),
+    ).toBe(true);
+    const metrics = await a.get("/api/operations");
+    expect(metrics.status).toBe(200);
+    expect(metrics.body.tenantId).toBe(tenantA);
+    expect(metrics.body.duplicates).toEqual([]);
+    expect(metrics.body.rejectionRate).toBeGreaterThan(0);
+    expect((await viewer.get("/api/operations")).status).toBe(403);
+  });
+  it('deduplicates redelivery after a worker crashes between Mongo insert and PostgreSQL acknowledgement',async()=>{
+    const response=await post(randomUUID());expect(response.status).toBe(201);await deliverEvents();
+    await db.outbox.updateMany({where:{tenantId:tenantA,payload:{path:['attemptId'],equals:response.body.attemptId}},data:{deliveredAt:null,nextAttemptAt:new Date()}});
+    await Promise.all([deliverEvents(),deliverEvents()]);
+    expect(await events.countDocuments({tenantId:tenantA,attemptId:response.body.attemptId})).toBe(1);
+    expect(await db.outbox.count({where:{tenantId:tenantA,payload:{path:['attemptId'],equals:response.body.attemptId},deliveredAt:null}})).toBe(0);
+  });
+  it('detects imported duplicate success events and computes rejection rates',async()=>{
+    const tenantId=randomUUID(),attemptId=randomUUID();
+    await events.insertMany([{type:'attempt.succeeded',attemptId},{type:'attempt.succeeded',attemptId},{type:'attempt.rejected'},{type:'attempt.rejected'}].map(e=>({...e,tenantId,eventId:randomUUID()})));
+    const result=await metrics(tenantId);expect(result.duplicates).toHaveLength(1);expect(result.duplicates[0].count).toBe(2);expect(result.rejectionRate).toBe(.5);expect(result.total).toBe(4);
+  });
+  it('paginates chronological activity without duplicates and rejects a foreign cursor',async()=>{
+    await deliverEvents();const first=await a.get(`/api/students/${studentA}/activity?limit=2`);expect(first.body.nextCursor).toBeTruthy();const second=await a.get(`/api/students/${studentA}/activity`).query({limit:2,cursor:first.body.nextCursor});expect(second.status).toBe(200);expect(second.body.items.some((e:{eventId:string})=>first.body.items.some((f:{eventId:string})=>e.eventId===f.eventId))).toBe(false);expect((await b.get(`/api/students/${studentB}/activity`).query({cursor:first.body.nextCursor})).status).toBe(400);
+  });
+  it('applies role and suspension changes to an existing session',async()=>{
+    await db.tenant.update({where:{id:tenantB},data:{status:'SUSPENDED'}});try{expect((await b.get('/api/students')).status).toBe(401);}finally{await db.tenant.update({where:{id:tenantB},data:{status:'ACTIVE'}});}
+  });
+  it('rate limits authenticated writes with a consistent error',async()=>{
+    const agent=await signIn('Acme Training','evaluator@acme.test');let last;
+    for(let i=0;i<61;i++)last=await agent.patch(`/api/students/${studentA}`).set('X-Requested-With','readiness').send({name:'Rate limit probe',expectedVersion:999999});
+    expect(last?.status).toBe(429);expect(last?.body.code).toBe('RATE_LIMITED');expect(last?.body.requestId).toBeTruthy();
+  },20000);
+  it("logout revokes server-side session", async () => {
+    const agent = await signIn("Acme Training", "evaluator@acme.test");
+    expect(
+      (
+        await agent
+          .post("/api/auth/logout")
+          .set("X-Requested-With", "readiness")
+      ).status,
+    ).toBe(200);
+    expect((await agent.get("/api/students")).status).toBe(401);
+  });
 });

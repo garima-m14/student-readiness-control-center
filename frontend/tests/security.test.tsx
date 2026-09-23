@@ -1,16 +1,143 @@
-import { describe,it,expect,vi } from 'vitest';
-import { render,screen,act,waitFor } from '@testing-library/react';
-import { QueryClient,QueryClientProvider,useQuery } from '@tanstack/react-query';
-import { z } from 'zod';
-import { RequestScope } from '../src/api/client';
-function deferred<T>(){let resolve!:(value:T)=>void;const promise=new Promise<T>(r=>{resolve=r;});return {promise,resolve};}
-describe('request isolation regressions',()=>{
-  it('rejects tenant A response arriving after switching to tenant B, even when transport ignores abort',async()=>{const scope=new RequestScope();const old=deferred<Response>();vi.stubGlobal('fetch',vi.fn().mockReturnValueOnce(old.promise).mockResolvedValueOnce(new Response(JSON.stringify({name:'Tenant B student'}))));const first=scope.request('/students',z.object({name:z.string()})).catch(e=>e);scope.reset();const current=await scope.request('/students',z.object({name:z.string()}));old.resolve(new Response(JSON.stringify({name:'Tenant A student'})));expect((await first).name).toBe('AbortError');expect(current.name).toBe('Tenant B student');});
-  it('cancels stale search and prevents out-of-order data replacing newer rendered results',async()=>{const scope=new RequestScope();const old=deferred<Response>();vi.stubGlobal('fetch',vi.fn().mockReturnValueOnce(old.promise).mockResolvedValueOnce(new Response(JSON.stringify(['New result']))));const client=new QueryClient({defaultOptions:{queries:{retry:false}}});function Results({search}:{search:string}){const q=useQuery({queryKey:['tenant','user','students',search],queryFn:({signal})=>scope.request('/students?search='+search,z.array(z.string()),{signal})});return <div>{q.data?.join(',')??'Loading'}</div>;}
-    const view=render(<QueryClientProvider client={client}><Results search="old"/></QueryClientProvider>);expect(screen.getByText('Loading')).toBeInTheDocument();view.rerender(<QueryClientProvider client={client}><Results search="new"/></QueryClientProvider>);await screen.findByText('New result');await act(async()=>old.resolve(new Response(JSON.stringify(['Old result']))));expect(screen.queryByText('Old result')).not.toBeInTheDocument();expect(screen.getByText('New result')).toBeInTheDocument();
+import { describe, it, expect, vi } from "vitest";
+import { render, screen, act, waitFor } from "@testing-library/react";
+import {
+  QueryClient,
+  QueryClientProvider,
+  useQuery,
+} from "@tanstack/react-query";
+import { z } from "zod";
+import { RequestScope } from "../src/api/client";
+function deferred<T>() {
+  let resolve!: (value: T) => void;
+  const promise = new Promise<T>((r) => {
+    resolve = r;
   });
-  it('clears tenant cache and never renders late previous-tenant data',async()=>{const scope=new RequestScope();const old=deferred<Response>();vi.stubGlobal('fetch',vi.fn().mockReturnValueOnce(old.promise).mockResolvedValueOnce(new Response(JSON.stringify(['Northstar student']))));const client=new QueryClient({defaultOptions:{queries:{retry:false}}});function Results({tenant}:{tenant:string}){const q=useQuery({queryKey:[tenant,'students'],queryFn:({signal})=>scope.request('/students',z.array(z.string()),{signal})});return <p>{q.data?.join(',')??'Loading'}</p>;}
-    const view=render(<QueryClientProvider client={client}><Results tenant="Acme"/></QueryClientProvider>);scope.reset();await act(async()=>{await client.cancelQueries();client.clear();});view.rerender(<QueryClientProvider client={client}><Results tenant="Northstar"/></QueryClientProvider>);await screen.findByText('Northstar student');await act(async()=>old.resolve(new Response(JSON.stringify(['Acme student']))));await waitFor(()=>expect(screen.queryByText('Acme student')).not.toBeInTheDocument());expect(client.getQueryData(['Acme','students'])).toBeUndefined();
+  return { promise, resolve };
+}
+describe("request isolation regressions", () => {
+  it("rejects tenant A response arriving after switching to tenant B, even when transport ignores abort", async () => {
+    const scope = new RequestScope();
+    const old = deferred<Response>();
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockReturnValueOnce(old.promise)
+        .mockResolvedValueOnce(
+          new Response(JSON.stringify({ name: "Tenant B student" })),
+        ),
+    );
+    const first = scope
+      .request("/students", z.object({ name: z.string() }))
+      .catch((e) => e);
+    scope.reset();
+    const current = await scope.request(
+      "/students",
+      z.object({ name: z.string() }),
+    );
+    old.resolve(new Response(JSON.stringify({ name: "Tenant A student" })));
+    expect((await first).name).toBe("AbortError");
+    expect(current.name).toBe("Tenant B student");
   });
-  it('validates external JSON',async()=>{vi.stubGlobal('fetch',vi.fn().mockResolvedValue(new Response(JSON.stringify({score:'untrusted'}))));await expect(new RequestScope().request('/student',z.object({score:z.number()}))).rejects.toThrow();});
+  it("cancels stale search and prevents out-of-order data replacing newer rendered results", async () => {
+    const scope = new RequestScope();
+    const old = deferred<Response>();
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockReturnValueOnce(old.promise)
+        .mockResolvedValueOnce(new Response(JSON.stringify(["New result"]))),
+    );
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    function Results({ search }: { search: string }) {
+      const q = useQuery({
+        queryKey: ["tenant", "user", "students", search],
+        queryFn: ({ signal }) =>
+          scope.request("/students?search=" + search, z.array(z.string()), {
+            signal,
+          }),
+      });
+      return <div>{q.data?.join(",") ?? "Loading"}</div>;
+    }
+    const view = render(
+      <QueryClientProvider client={client}>
+        <Results search="old" />
+      </QueryClientProvider>,
+    );
+    expect(screen.getByText("Loading")).toBeInTheDocument();
+    view.rerender(
+      <QueryClientProvider client={client}>
+        <Results search="new" />
+      </QueryClientProvider>,
+    );
+    await screen.findByText("New result");
+    await act(async () =>
+      old.resolve(new Response(JSON.stringify(["Old result"]))),
+    );
+    expect(screen.queryByText("Old result")).not.toBeInTheDocument();
+    expect(screen.getByText("New result")).toBeInTheDocument();
+  });
+  it("clears tenant cache and never renders late previous-tenant data", async () => {
+    const scope = new RequestScope();
+    const old = deferred<Response>();
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockReturnValueOnce(old.promise)
+        .mockResolvedValueOnce(
+          new Response(JSON.stringify(["Northstar student"])),
+        ),
+    );
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    function Results({ tenant }: { tenant: string }) {
+      const q = useQuery({
+        queryKey: [tenant, "students"],
+        queryFn: ({ signal }) =>
+          scope.request("/students", z.array(z.string()), { signal }),
+      });
+      return <p>{q.data?.join(",") ?? "Loading"}</p>;
+    }
+    const view = render(
+      <QueryClientProvider client={client}>
+        <Results tenant="Acme" />
+      </QueryClientProvider>,
+    );
+    scope.reset();
+    await act(async () => {
+      await client.cancelQueries();
+      client.clear();
+    });
+    view.rerender(
+      <QueryClientProvider client={client}>
+        <Results tenant="Northstar" />
+      </QueryClientProvider>,
+    );
+    await screen.findByText("Northstar student");
+    await act(async () =>
+      old.resolve(new Response(JSON.stringify(["Acme student"]))),
+    );
+    await waitFor(() =>
+      expect(screen.queryByText("Acme student")).not.toBeInTheDocument(),
+    );
+    expect(client.getQueryData(["Acme", "students"])).toBeUndefined();
+  });
+  it("validates external JSON", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi
+        .fn()
+        .mockResolvedValue(
+          new Response(JSON.stringify({ score: "untrusted" })),
+        ),
+    );
+    await expect(
+      new RequestScope().request("/student", z.object({ score: z.number() })),
+    ).rejects.toThrow();
+  });
 });

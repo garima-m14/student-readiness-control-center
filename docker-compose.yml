@@ -17,7 +17,8 @@ services:
     ports: ["127.0.0.1:${MONGO_PORT:-27018}:27017"]
     volumes: ["mongo-data:/data/db"]
     healthcheck:
-      test: ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
+      test:
+        ["CMD", "mongosh", "--quiet", "--eval", "db.adminCommand('ping').ok"]
       interval: 5s
       timeout: 5s
       retries: 30
@@ -30,15 +31,21 @@ services:
       MONGODB_URL: mongodb://mongo:27017/readiness
       JWT_SECRET: ${JWT_SECRET:?Set JWT_SECRET in .env}
       SEED_PASSWORD: ${SEED_PASSWORD:?Set SEED_PASSWORD in .env}
-      FRONTEND_ORIGIN: http://localhost:5173
+      FRONTEND_ORIGIN: http://localhost:5174
       COOKIE_SECURE: "false"
       PORT: 4000
     ports: ["127.0.0.1:4000:4000"]
     depends_on:
-      postgres: {condition: service_healthy}
-      mongo: {condition: service_healthy}
+      postgres: { condition: service_healthy }
+      mongo: { condition: service_healthy }
     healthcheck:
-      test: ["CMD", "node", "-e", "fetch('http://localhost:4000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"]
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://localhost:4000/api/health').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
       interval: 5s
       timeout: 5s
       retries: 30
@@ -46,9 +53,9 @@ services:
     build:
       context: .
       dockerfile: frontend/Dockerfile
-    ports: ["127.0.0.1:5173:80"]
+    ports: ["127.0.0.1:5174:80"]
     depends_on:
-      backend: {condition: service_healthy}
+      backend: { condition: service_healthy }
 volumes:
   postgres-data:
   mongo-data:

@@ -1,9 +1,77 @@
-import 'dotenv/config';
-import { test,expect } from '@playwright/test';
-async function signIn(page:import('@playwright/test').Page,organization='Acme Training',email='admin@acme.test'){
-  await page.goto('/login');await page.getByLabel('Organization',{exact:true}).fill(organization);await page.getByLabel('Email address').fill(email);await page.getByLabel('Password',{exact:true}).fill(process.env.SEED_PASSWORD!);await page.getByRole('button',{name:'Sign in',exact:true}).click();await expect(page.getByRole('heading',{name:'Student overview.'})).toBeVisible();
+import "dotenv/config";
+import { test, expect } from "@playwright/test";
+async function signIn(
+  page: import("@playwright/test").Page,
+  organization = "Acme Training",
+  email = "admin@acme.test",
+) {
+  await page.goto("/login");
+  await page.getByLabel("Organization", { exact: true }).fill(organization);
+  await page.getByLabel("Email address").fill(email);
+  await page
+    .getByLabel("Password", { exact: true })
+    .fill(process.env.SEED_PASSWORD!);
+  await page.getByRole("button", { name: "Sign in", exact: true }).click();
+  await expect(
+    page.getByRole("heading", { name: "Student overview." }),
+  ).toBeVisible();
 }
-test('sign in, search, assess, edit and switch tenant without leaking prior student',async({page})=>{
-  await signIn(page);await page.getByRole('textbox',{name:'Search students'}).fill('Olivia');await expect(page.getByText('Olivia Chen',{exact:true})).toBeVisible();await expect(page).toHaveURL(/search=Olivia/);await page.getByText('Olivia Chen',{exact:true}).click();await expect(page.getByRole('heading',{name:'Competency evidence'})).toBeVisible();await page.getByLabel('Score',{exact:false}).fill('88');await page.getByRole('button',{name:'Save assessment'}).click();await expect(page.getByRole('status')).toContainText('Assessment saved');await expect(page.getByText('Assessment recorded',{exact:true}).first()).toBeVisible({timeout:15000});await page.getByText('Edit student information',{exact:false}).click();await page.getByLabel('Phone',{exact:true}).fill('555-0100');await page.getByRole('button',{name:'Save changes'}).click();await expect(page.getByText('Student information updated.')).toBeVisible();await page.getByRole('button',{name:'Sign out or switch account'}).click();await expect(page).toHaveURL('/login');await signIn(page,'Northstar Academy','admin@northstar.test');await expect(page.getByText('Northstar Academy',{exact:true})).toBeVisible();await expect(page.getByText('Olivia Chen',{exact:true})).toHaveCount(0);
+test("sign in, search, assess, edit and switch tenant without leaking prior student", async ({
+  page,
+}) => {
+  await signIn(page);
+  await page.getByRole("textbox", { name: "Search students" }).fill("Olivia");
+  await expect(page.getByText("Olivia Chen", { exact: true })).toBeVisible();
+  await expect(page).toHaveURL(/search=Olivia/);
+  await page.getByText("Olivia Chen", { exact: true }).click();
+  await expect(
+    page.getByRole("heading", { name: "Competency evidence" }),
+  ).toBeVisible();
+  await page.getByLabel("Score", { exact: false }).fill("88");
+  await page.getByRole("button", { name: "Save assessment" }).click();
+  await expect(page.getByRole("status")).toContainText("Assessment saved");
+  await expect(
+    page.getByText("Assessment recorded", { exact: true }).first(),
+  ).toBeVisible({ timeout: 15000 });
+  await page.getByText("Edit student information", { exact: false }).click();
+  await page.getByLabel("Phone", { exact: true }).fill("555-0100");
+  await page.getByRole("button", { name: "Save changes" }).click();
+  await expect(page.getByText("Student information updated.")).toBeVisible();
+  await page
+    .getByRole("button", { name: "Sign out or switch account" })
+    .click();
+  await expect(page).toHaveURL("/login");
+  await signIn(page, "Northstar Academy", "admin@northstar.test");
+  await expect(
+    page.getByText("Northstar Academy", { exact: true }),
+  ).toBeVisible();
+  await expect(page.getByText("Olivia Chen", { exact: true })).toHaveCount(0);
 });
-test('responsive directory, empty state, filters and pagination',async({page})=>{await signIn(page);await page.getByLabel('Rows per page').selectOption('5');await expect(page.locator('tbody tr')).toHaveCount(5);await page.getByRole('button',{name:'Next',exact:true}).click();await expect(page).toHaveURL(/cursor=/);await page.getByRole('button',{name:'First',exact:true}).click();await page.getByLabel('Readiness filter').selectOption('READY');await expect(page.locator('tbody .badge').first()).toHaveText('Ready');await page.getByRole('textbox',{name:'Search students'}).fill('no-student-matches-this');await expect(page.getByRole('heading',{name:'No students found'})).toBeVisible();await page.getByRole('button',{name:'Clear filters'}).click();await page.setViewportSize({width:390,height:844});await expect(page.getByRole('heading',{name:'Student overview.'})).toBeVisible();expect(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth)).toBe(true);});
+test("responsive directory, empty state, filters and pagination", async ({
+  page,
+}) => {
+  await signIn(page);
+  await page.getByLabel("Rows per page").selectOption("5");
+  await expect(page.locator("tbody tr")).toHaveCount(5);
+  await page.getByRole("button", { name: "Next", exact: true }).click();
+  await expect(page).toHaveURL(/cursor=/);
+  await page.getByRole("button", { name: "First", exact: true }).click();
+  await page.getByLabel("Readiness filter").selectOption("READY");
+  await expect(page.locator("tbody .badge").first()).toHaveText("Ready");
+  await page
+    .getByRole("textbox", { name: "Search students" })
+    .fill("no-student-matches-this");
+  await expect(
+    page.getByRole("heading", { name: "No students found" }),
+  ).toBeVisible();
+  await page.getByRole("button", { name: "Clear filters" }).click();
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(
+    page.getByRole("heading", { name: "Student overview." }),
+  ).toBeVisible();
+  expect(
+    await page.evaluate(
+      () => document.documentElement.scrollWidth <= window.innerWidth,
+    ),
+  ).toBe(true);
+});
