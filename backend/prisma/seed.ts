@@ -1,5 +1,6 @@
 import 'dotenv/config';
 import bcrypt from 'bcryptjs';
+import type { User } from '@prisma/client';
 import { db } from '../src/database/client.js';
 import { weights } from '../src/competencies/catalog.js';
 import { calculateReadiness } from '../src/readiness/domain.js';
@@ -11,7 +12,7 @@ export async function seed() {
   for(const name of ['Acme Training','Northstar Academy']) {
     const tenant=await db.tenant.upsert({where:{name},create:{name},update:{}});
     const slug=name.startsWith('Acme')?'acme':'northstar';
-    const users=[];
+    const users:User[]=[];
     for(const role of ['ADMIN','EVALUATOR','VIEWER'] as const) users.push(await db.user.upsert({where:{tenantId_email:{tenantId:tenant.id,email:`${role.toLowerCase()}@${slug}.test`}},create:{tenantId:tenant.id,name:`${slug==='acme'?'Alex Morgan':'Jordan Lee'} · ${role.toLowerCase()}`,email:`${role.toLowerCase()}@${slug}.test`,passwordHash,role},update:{}}));
     const names=slug==='acme'?['Olivia Chen','James Wilson','Amara Okafor','Noah Patel','Sofia Martinez','Ethan Brooks','Isabella Kim','Liam Anderson','Mia Thompson','Lucas Rivera','Ava Williams','Benjamin Scott']:['Harper Davis','Henry Lewis','Evelyn Walker','Jack Hall','Charlotte Young','Leo Allen','Grace King','Daniel Wright','Ella Hill','Owen Green','Lily Adams','Arjun Shah'];
     for(const [index,studentName] of names.entries()) {

@@ -25,7 +25,7 @@ export async function listStudents(tenantId:string,q:z.infer<typeof listSchema>)
   const [rows,total,groups]=await db.$transaction([
     db.student.findMany({where,orderBy:[{[field]:direction},{id:direction}],take:q.limit+1,...(cursorId?{cursor:{id:cursorId},skip:1}:{})}),
     db.student.count({where}),
-    db.student.groupBy({by:['status'],where:{tenantId},_count:{_all:true}}),
+    db.student.groupBy({by:['status'],orderBy:{status:'asc'},where:{tenantId},_count:{_all:true}}),
   ],{isolationLevel:'RepeatableRead'});
   const more=rows.length>q.limit; const items=rows.slice(0,q.limit).map(s=>({...s,score:Number(s.score)}));
   const payload=Buffer.from(JSON.stringify({id:items.at(-1)?.id,tenantId,search:q.search,status:q.status,sort:q.sort})).toString('base64url');

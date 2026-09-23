@@ -3,7 +3,6 @@ import { authenticate, type Identity } from '../auth/service.js';
 import { ApiError } from '../utils/errors.js';
 declare global { namespace Express { interface Request { identity:Identity; requestId:string; } } }
 export const asyncHandler = (fn:(req:Request,res:Response)=>Promise<unknown>) => (req:Request,res:Response,next:NextFunction) => {Promise.resolve(fn(req,res)).catch(next);};
-export const auth = asyncHandler(async(req,_res) => {req.identity=await authenticate(String(req.cookies?.session || ''));});
 export function authenticated(req:Request,res:Response,next:NextFunction) {authenticate(String(req.cookies?.session || '')).then(user => {req.identity=user;next();}).catch(next);}
 export function writers(req:Request,_res:Response,next:NextFunction) {next(req.identity.role === 'VIEWER' ? new ApiError(403,'FORBIDDEN','You do not have permission to make changes') : undefined);}
 export function sameOrigin(req:Request,_res:Response,next:NextFunction) {

@@ -1,1 +1,29 @@
-{"name":"student-readiness-control-center","private":true,"workspaces":["backend","frontend"],"scripts":{"build":"npm run build --workspaces","typecheck":"npm run typecheck --workspaces","lint":"eslint backend/src backend/tests frontend/src frontend/tests","test":"npm run test --workspaces","test:integration":"npm run test:integration -w backend","test:e2e":"playwright test","db:migrate":"npm run db:migrate -w backend","db:seed":"npm run db:seed -w backend"},"devDependencies":{"@eslint/js":"^9.22.0","typescript-eslint":"^8.26.0","eslint":"^9.22.0","@playwright/test":"^1.51.1"}}
+{
+  "name": "student-readiness-control-center",
+  "private": true,
+  "workspaces": [
+    "backend",
+    "frontend"
+  ],
+  "scripts": {
+    "build": "npm run build --workspaces",
+    "typecheck": "npm run typecheck --workspaces",
+    "lint": "eslint backend/src backend/tests frontend/src frontend/tests",
+    "test": "npm run test --workspaces",
+    "test:integration": "npm run test:integration -w backend",
+    "test:e2e": "playwright test",
+    "db:migrate": "npm run db:migrate -w backend",
+    "db:seed": "npm run db:seed -w backend",
+    "setup": "node scripts/setup.mjs"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.22.0",
+    "typescript-eslint": "^8.26.0",
+    "eslint": "^9.22.0",
+    "@playwright/test": "^1.51.1",
+    "prettier": "^3.5.3"
+  },
+  "engines": {
+    "node": ">=22.13.0"
+  }
+}
